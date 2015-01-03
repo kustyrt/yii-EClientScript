@@ -84,6 +84,8 @@ class EClientScript extends CClientScript
 	 * @var string base request url
 	 */
 	private $_baseUrl;
+	
+	public $cssForIgnore = array('bootstrap.min.css');
 
 	/**
 	 * init base url map
@@ -209,83 +211,89 @@ class EClientScript extends CClientScript
 			return;
 		}
 		$cssFiles = array();
-		foreach ($this->cssFiles as $url => $media) {
-			$file = $this->getLocalPath($url);
-			if ($file === false) {
-				$cssFiles[$url] = $media;
-			} else {
-				// DO-NOT convert media to lower HERE (i.e: lt IE 6)
-				$media = $media === '' ? 'all' : $media;
-				if (!isset($cssFiles[$media])) {
-					$cssFiles[$media] = array();
-				}
-				$cssFiles[$media][$url] = $file;
-			}
-		}
+		$toBeCombined = array();
 
-		$this->cssFiles = array();
-		foreach ($cssFiles as $media => $files) {
-			if ($media === 'all') {
-				$media = '';
-			}
-			if (!is_array($files)) {
-				$url = $media;
-				$media = $files;
-			} elseif (count($files) === 1) {
-				$url = key($files);
-			} else {
-				// get unique combined filename
-				$fname = $this->getCombinedFileName($this->cssFileName, $files, $media);
-				$fpath = Yii::app()->assetManager->basePath . DIRECTORY_SEPARATOR . $fname;
-				// check exists file
-				if (($valid = file_exists($fpath)) === true) {
-					$mtime = filemtime($fpath);
-					foreach ($files as $file) {
-						if ($mtime < filemtime($file)) {
-							$valid = false;
-							break;
-						}
-					}
-				}
-				// re-generate the file
-				if (!$valid) {
-					$urlRegex = '#url\s*\(\s*([\'"])?(?!/|http://|data\:)([^\'"\s])#i';
-					$fileBuffer = '';
-					$charsetLine = '';
-					foreach ($files as $url => $file) {
-						$contents = file_get_contents($file);
-						if ($contents) {
-							// Reset relative url() in css file
-							if (preg_match($urlRegex, $contents)) {
-								$reurl = $this->getRelativeUrl(Yii::app()->assetManager->baseUrl, dirname($url));
-								$contents = preg_replace($urlRegex, 'url(${1}' . $reurl . '/${2}', $contents);
-							}
-							// Check @charset line
-							if (preg_match('/@charset\s+"(.+?)";?/', $contents, $matches)) {
-								if ($charsetLine === '') {
-									$charsetLine = '@charset "' . $matches[1] . '"' . ";\n";
-								}
-								$contents = preg_replace('/@charset\s+"(.+?)";?/', '', $contents);
-							}
 
-							// Append the contents to the fileBuffer
-							if ($this->optimizeCssFiles && strpos($file, '.min.') === false && strpos($file, '.pack.') === false) {
-								$original_size = number_format(strlen($contents));
-								$contents = $this->optimizeCssCode($contents);
-								$compressed_size = number_format(strlen($contents));
-							} elseif ($this->addFileComment) {
-								$original_size = $compressed_size = number_format(strlen($contents));
-							}
-							$fileBuffer .= ( $this->addFileComment ? "/*** CSS File: {$url}" . ( $this->optimizeCssFiles ? ", Original size: " . $original_size . ", Compressed size: " . $compressed_size : "" ) . " ***/\n" : "" ) . $contents . "\n\n";
-						}
-					}
-					$this->saveFile($fpath, $charsetLine . $fileBuffer);
-				}
-				// real url of combined file
-				$url = Yii::app()->assetManager->baseUrl . '/' . $fname;
-			}
-			$this->cssFiles[$url] = $media;
-		}
+
+	        foreach ($this->cssFiles as $url => $media) {
+	            $file = $this->getLocalPath($url);
+	            if ($file === false) {
+	                $cssFiles[$url] = $media;
+	            } else {
+	
+	                $media = $media === '' ? 'all' : $media;
+	
+	                if (!isset($toBeCombined[$media])) {
+	                    $toBeCombined[$media] = array();
+	                }
+	                if (in_array(basename($file), $this->cssForIgnore)) {
+	                    $cssFiles[$url] = $media;
+	                } else {
+	                    $toBeCombined[$media][$url] = $file;
+	                }
+	            }
+	        }
+	
+	        foreach ($toBeCombined as $media => $files) {
+	            if (count($files)) {
+	                if ($media === 'all') {
+	                    $media = '';
+	                }
+	
+	                if (count($files) === 1) {
+	                    $url = key($files);
+	                } else {
+	                    // get unique combined filename
+	                    $fname = $this->getCombinedFileName($this->cssFileName, $files, $media);
+	                    $fpath = Yii::app()->assetManager->basePath . DIRECTORY_SEPARATOR . $fname;
+	                    // check exists file
+	                    if ($valid = file_exists($fpath)) {
+	                        $mtime = filemtime($fpath);
+	                        foreach ($files as $file) {
+	                            if ($mtime < filemtime($file)) {
+	                                $valid = false;
+	                                break;
+	                            }
+	                        }
+	                    }
+	                    // re-generate the file
+	                    if (!$valid) {
+	                        $urlRegex = '#url\s*\(\s*([\'"])?(?!/|http://)([^\'"\s])#i';
+	                        $fileBuffer = '';
+	                        foreach ($files as $url => $file) {
+	                            $contents = file_get_contents($file);
+	                            if ($contents) {
+	                                // Reset relative url() in css file
+	                                if (preg_match($urlRegex, $contents)) {
+	                                    $reurl = $this->getRelativeUrl(Yii::app()->assetManager->baseUrl, dirname($url));
+	                                    $contents = preg_replace($urlRegex, 'url(${1}' . $reurl . '/${2}', $contents);
+	                                }
+	                                // Append the contents to the fileBuffer
+	                                $fileBuffer .= "/*** CSS File: {$url}";
+	                                if ($this->optimizeCssFiles
+	                                    && strpos($file, '.min.') === false && strpos($file, '.pack.') === false
+	                                ) {
+	                                    $fileBuffer .= ", Original size: " . number_format(
+	                                            strlen($contents)
+	                                        ) . ", Compressed size: ";
+	                                    $contents = $this->optimizeCssCode($contents);
+	                                    $fileBuffer .= number_format(strlen($contents));
+	                                }
+	                                $fileBuffer .= " ***/\n";
+	                                $fileBuffer .= $contents . "\n\n";
+	                            }
+	                        }
+	                        file_put_contents($fpath, $fileBuffer);
+	                    }
+	                    // real url of combined file
+	                    $url = Yii::app()->assetManager->baseUrl . '/' . $fname . '?' . filemtime($fpath);
+	                }
+	                $cssFiles[$url] = $media;
+	
+	            }
+	        }
+	        // use new cssFiles list replace old ones
+	        $this->cssFiles = $cssFiles;
 	}
 
 	/**
